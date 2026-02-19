@@ -55,7 +55,7 @@ async function checkTwitter(bot, chatId, topicId) {
       changed = true;
 
       for (const t of fresh.reverse()) {
-        await send(bot, chatId, topicId, fmtTweet(handle, t));
+        await send(bot, chatId, topicId, fmtTweet(handle, t), tweetButtons(handle, t));
         await sleep(1000);
       }
     } catch (err) {
@@ -114,7 +114,7 @@ async function pushLatest(bot, count = 3) {
     try {
       const tweets = await fetchTweets(handle);
       for (const t of tweets.slice(0, count)) {
-        await send(bot, chatId, topicId, fmtTweet(handle, t));
+        await send(bot, chatId, topicId, fmtTweet(handle, t), tweetButtons(handle, t));
         sent++;
         await sleep(1000);
       }
@@ -145,9 +145,15 @@ async function pushLatest(bot, count = 3) {
 function fmtTweet(handle, t) {
   return (
     `<b>𝕏  @${esc(handle)}</b>\n\n` +
-    `${esc(t.text?.slice(0, 500))}\n\n` +
-    `<a href="${t.url}">View post</a>`
+    esc(t.text?.slice(0, 500))
   );
+}
+
+function tweetButtons(handle, t) {
+  return [[
+    { text: 'View Post', url: t.url },
+    { text: `@${handle}`, url: `https://x.com/${handle}` },
+  ]];
 }
 
 function fmtRedditPost(name, type, p) {
@@ -159,36 +165,49 @@ function fmtRedditPost(name, type, p) {
   return (
     `<b>Reddit  ${label}</b>${sub}${flair}\n\n` +
     `<b>${esc(p.title)}</b>${preview}\n\n` +
-    `👍 ${p.score}  💬 ${p.numComments}\n` +
-    `<a href="${p.url}">View post</a>`
+    `👍 ${p.score}  💬 ${p.numComments}`
   );
+}
+
+function redditButtons(name, type, p) {
+  const profileUrl = type === 'subreddit'
+    ? `https://reddit.com/r/${name}`
+    : `https://reddit.com/user/${name}`;
+  const profileLabel = type === 'subreddit' ? `r/${name}` : `u/${name}`;
+  return [[
+    { text: 'View Post', url: p.url },
+    { text: profileLabel, url: profileUrl },
+  ]];
 }
 
 async function sendRedditPost(bot, chatId, topicId, name, type, p) {
   const msg = fmtRedditPost(name, type, p);
+  const buttons = redditButtons(name, type, p);
   if (p.image) {
-    await sendPhoto(bot, chatId, topicId, p.image, msg);
+    await sendPhoto(bot, chatId, topicId, p.image, msg, buttons);
   } else {
-    await send(bot, chatId, topicId, msg);
+    await send(bot, chatId, topicId, msg, buttons);
   }
 }
 
 // ── Transport ───────────────────────────────────────────────
 
-async function send(bot, chatId, topicId, text) {
+async function send(bot, chatId, topicId, text, buttons) {
   const opts = { parse_mode: 'HTML', disable_web_page_preview: false };
   if (topicId) opts.message_thread_id = topicId;
+  if (buttons) opts.reply_markup = { inline_keyboard: buttons };
   await bot.sendMessage(chatId, text, opts);
 }
 
-async function sendPhoto(bot, chatId, topicId, imageUrl, caption) {
+async function sendPhoto(bot, chatId, topicId, imageUrl, caption, buttons) {
   try {
     const opts = { parse_mode: 'HTML' };
     if (topicId) opts.message_thread_id = topicId;
+    if (buttons) opts.reply_markup = { inline_keyboard: buttons };
     opts.caption = caption.slice(0, 1024);
     await bot.sendPhoto(chatId, imageUrl, opts);
   } catch {
-    await send(bot, chatId, topicId, caption);
+    await send(bot, chatId, topicId, caption, buttons);
   }
 }
 
