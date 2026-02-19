@@ -61,6 +61,7 @@ async function checkTwitter(bot, chatId, topicId) {
     } catch (err) {
       console.error(`[twitter] @${handle}:`, err.message);
     }
+    await sleep(3000);
   }
 
   if (changed) store.set('twitter', accounts);
@@ -120,6 +121,7 @@ async function pushLatest(bot, count = 3) {
     } catch (err) {
       console.error(`[latest] @${handle}:`, err.message);
     }
+    await sleep(3000);
   }
 
   for (const [name, info] of Object.entries(store.get('reddit') || {})) {
