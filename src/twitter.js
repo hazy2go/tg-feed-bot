@@ -24,13 +24,17 @@ async function fetchTweets(handle) {
     .map(e => {
       const t = e.content?.tweet;
       if (!t) return null;
+      const screenName = (t.user?.screen_name || handle).toLowerCase();
+      const replyTo = t.in_reply_to_screen_name?.toLowerCase() || null;
       return {
         id: t.id_str,
         text: t.text || '',
         url: `https://x.com/${t.user?.screen_name || handle}/status/${t.id_str}`,
         date: t.created_at ? new Date(t.created_at).toISOString() : null,
         author: handle,
-        isRetweet: (t.text || '').startsWith('RT @'),
+        isRetweet: !!t.retweeted_status || (t.text || '').startsWith('RT @'),
+        isThreadReply: replyTo === screenName,
+        isReply: !!t.in_reply_to_status_id_str,
       };
     })
     .filter(Boolean);

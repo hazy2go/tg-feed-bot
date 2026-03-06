@@ -3,6 +3,7 @@ const { fetchRedditPosts } = require('./reddit');
 const store = require('./store');
 
 let timer = null;
+let checking = false;
 
 function startMonitor(bot) {
   const mins = store.get('checkInterval') || 5;
@@ -21,21 +22,26 @@ function schedule(bot, mins) {
 }
 
 async function checkAll(bot) {
-  const chatId = store.get('chatId');
-  if (!chatId) return;
-  const topicId = store.get('topicId');
+  if (checking) { console.log('[monitor] Check already running, skipping'); return; }
+  checking = true;
+  try {
+    const chatId = store.get('chatId');
+    if (!chatId) return;
+    const topicId = store.get('topicId');
 
-  await checkTwitter(bot, chatId, topicId);
-  await checkReddit(bot, chatId, topicId);
+    await checkTwitter(bot, chatId, topicId);
+    await checkReddit(bot, chatId, topicId);
 
-  console.log(`[monitor] Check done @ ${new Date().toISOString()}`);
+    console.log(`[monitor] Check done @ ${new Date().toISOString()}`);
+  } finally {
+    checking = false;
+  }
 }
 
 // ── Twitter ─────────────────────────────────────────────────
 
 async function checkTwitter(bot, chatId, topicId) {
   const accounts = store.get('twitter') || {};
-  let changed = false;
 
   for (const [handle, info] of Object.entries(accounts)) {
     try {
@@ -44,15 +50,20 @@ async function checkTwitter(bot, chatId, topicId) {
 
       if (!info.lastSeen) {
         accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, lastCheck: now() };
-        changed = true;
+        store.set('twitter', accounts);
         console.log(`[twitter] @${handle} — baseline set`);
         continue;
       }
 
       const cutoff = new Date(info.lastSeenDate || 0);
-      const fresh = tweets.filter(t => t.id !== info.lastSeen && new Date(t.date) > cutoff);
+      const fresh = tweets.filter(t =>
+        t.id !== info.lastSeen &&
+        new Date(t.date) > cutoff &&
+        !t.isRetweet &&
+        !t.isThreadReply
+      );
       accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, lastCheck: now() };
-      changed = true;
+      store.set('twitter', accounts);
 
       for (const t of fresh.reverse()) {
         await send(bot, chatId, topicId, fmtTweet(handle, t), tweetButtons(handle, t));
@@ -63,15 +74,12 @@ async function checkTwitter(bot, chatId, topicId) {
     }
     await sleep(3000);
   }
-
-  if (changed) store.set('twitter', accounts);
 }
 
 // ── Reddit ──────────────────────────────────────────────────
 
 async function checkReddit(bot, chatId, topicId) {
   const accounts = store.get('reddit') || {};
-  let changed = false;
 
   for (const [name, info] of Object.entries(accounts)) {
     try {
@@ -80,7 +88,7 @@ async function checkReddit(bot, chatId, topicId) {
 
       if (!info.lastSeen) {
         accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, lastCheck: now() };
-        changed = true;
+        store.set('reddit', accounts);
         console.log(`[reddit] ${name} — baseline set`);
         continue;
       }
@@ -88,7 +96,7 @@ async function checkReddit(bot, chatId, topicId) {
       const cutoff = new Date(info.lastSeenDate || 0);
       const fresh = posts.filter(p => p.id !== info.lastSeen && new Date(p.date) > cutoff);
       accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, lastCheck: now() };
-      changed = true;
+      store.set('reddit', accounts);
 
       for (const p of fresh.reverse()) {
         await sendRedditPost(bot, chatId, topicId, name, info.type, p);
@@ -98,8 +106,6 @@ async function checkReddit(bot, chatId, topicId) {
       console.error(`[reddit] ${name}:`, err.message);
     }
   }
-
-  if (changed) store.set('reddit', accounts);
 }
 
 // ── Push latest (ignores baseline) ─────────────────────────
@@ -113,7 +119,8 @@ async function pushLatest(bot, count = 3) {
   for (const handle of Object.keys(store.get('twitter') || {})) {
     try {
       const tweets = await fetchTweets(handle);
-      for (const t of tweets.slice(0, count)) {
+      const original = tweets.filter(t => !t.isRetweet && !t.isThreadReply);
+      for (const t of original.slice(0, count)) {
         await send(bot, chatId, topicId, fmtTweet(handle, t), tweetButtons(handle, t));
         sent++;
         await sleep(1000);
