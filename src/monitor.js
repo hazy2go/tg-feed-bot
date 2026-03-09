@@ -48,21 +48,26 @@ async function checkTwitter(bot, chatId, topicId) {
       const tweets = await fetchTweets(handle);
       if (!tweets.length) continue;
 
-      if (!info.lastSeen) {
-        accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, lastCheck: now() };
+      const seenIds = new Set(info.seenIds || []);
+
+      // First run ever OR migrating from old format (has lastSeen but no seenIds)
+      if (!info.lastSeen || !info.seenIds) {
+        tweets.forEach(t => seenIds.add(t.id));
+        accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, seenIds: [...seenIds], lastCheck: now() };
         store.set('twitter', accounts);
         console.log(`[twitter] @${handle} — baseline set`);
         continue;
       }
 
-      const cutoff = new Date(info.lastSeenDate || 0);
       const fresh = tweets.filter(t =>
-        t.id !== info.lastSeen &&
-        new Date(t.date) > cutoff &&
+        !seenIds.has(t.id) &&
         !t.isRetweet &&
         !t.isThreadReply
       );
-      accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, lastCheck: now() };
+      fresh.forEach(t => seenIds.add(t.id));
+      // Keep only the last 100 IDs to avoid unbounded growth
+      const seenArr = [...seenIds].slice(-100);
+      accounts[handle] = { ...info, lastSeen: tweets[0].id, lastSeenDate: tweets[0].date, seenIds: seenArr, lastCheck: now() };
       store.set('twitter', accounts);
 
       for (const t of fresh.reverse()) {
@@ -86,16 +91,20 @@ async function checkReddit(bot, chatId, topicId) {
       const posts = await fetchRedditPosts(name, info.type);
       if (!posts.length) continue;
 
-      if (!info.lastSeen) {
-        accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, lastCheck: now() };
+      const seenIds = new Set(info.seenIds || []);
+
+      if (!info.lastSeen || !info.seenIds) {
+        posts.forEach(p => seenIds.add(p.id));
+        accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, seenIds: [...seenIds], lastCheck: now() };
         store.set('reddit', accounts);
         console.log(`[reddit] ${name} — baseline set`);
         continue;
       }
 
-      const cutoff = new Date(info.lastSeenDate || 0);
-      const fresh = posts.filter(p => p.id !== info.lastSeen && new Date(p.date) > cutoff);
-      accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, lastCheck: now() };
+      const fresh = posts.filter(p => !seenIds.has(p.id));
+      fresh.forEach(p => seenIds.add(p.id));
+      const seenArr = [...seenIds].slice(-100);
+      accounts[name] = { ...info, lastSeen: posts[0].id, lastSeenDate: posts[0].date, seenIds: seenArr, lastCheck: now() };
       store.set('reddit', accounts);
 
       for (const p of fresh.reverse()) {
